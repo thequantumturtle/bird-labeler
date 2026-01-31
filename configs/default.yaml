@@ -1,0 +1,6 @@
+input:
+  path: ""
+output:
+  path: ""
+processing:
+  max_frames: 30

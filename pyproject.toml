@@ -1,0 +1,43 @@
+[project]
+name = "bird-labeler"
+version = "0.1.0"
+description = "Bird labeling pipeline scaffold"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+dependencies = [
+  "typer",
+  "pydantic",
+  "pyyaml",
+  "numpy",
+  "opencv-python",
+  "ultralytics",
+]
+
+[project.scripts]
+bird-labeler = "bird_labeler.cli:app"
+
+[tool.uv]
+
+[tool.uv.dev-dependencies]
+pytest = "*"
+ruff = "*"
+pre-commit = "*"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+line-length = 100
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
