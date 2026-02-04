@@ -21,6 +21,9 @@ jobs:
         with:
           cache: true
 
+      - name: Create venv
+        run: uv venv
+
       - name: Install deps
         run: uv pip install -e . --group dev
 
