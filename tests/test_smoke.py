@@ -5,7 +5,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from bird_labeler.cli import run
+from typer.testing import CliRunner
+
+from bird_labeler.cli import app, run_pipeline
 
 
 def _write_test_video(path: Path, frame_count: int = 10) -> None:
@@ -39,7 +41,12 @@ def test_smoke_run(tmp_path: Path) -> None:
     output_path = tmp_path / "output.mp4"
     _write_test_video(input_path, frame_count=10)
 
-    run(input=input_path, out=output_path, config=Path("configs/default.yaml"), verbose=False)
+    run_pipeline(
+        input=input_path,
+        out=output_path,
+        config=Path("configs/default.yaml"),
+        verbose=False,
+    )
 
     assert output_path.exists()
     assert _count_frames(output_path) == 10
@@ -50,7 +57,7 @@ def test_smoke_run_with_fakes(tmp_path: Path) -> None:
     output_path = tmp_path / "output_fakes.mp4"
     _write_test_video(input_path, frame_count=10)
 
-    run(
+    run_pipeline(
         input=input_path,
         out=output_path,
         config=Path("configs/default.yaml"),
@@ -60,3 +67,10 @@ def test_smoke_run_with_fakes(tmp_path: Path) -> None:
 
     assert output_path.exists()
     assert _count_frames(output_path) == 10
+
+
+def test_cli_help() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"], prog_name="bird-labeler")
+    assert result.exit_code == 0
+    assert "Usage: bird-labeler" in result.output

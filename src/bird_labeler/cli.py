@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Annotated
 
 import cv2
 import typer
@@ -43,34 +42,18 @@ def _default_device() -> str:
         return "cpu"
 
 
-@app.command()
-def run(
-    input: Annotated[
-        Path, typer.Option(..., "--input", exists=True, readable=True, help="Input video path")
-    ],
-    out: Annotated[Path, typer.Option(..., "--out", help="Output video path")],
-    config: Annotated[
-        Path | None, typer.Option(None, "--config", exists=True, readable=True, help="Config path")
-    ] = None,
-    detector: Annotated[
-        str, typer.Option("--detector", help="Detector to use", case_sensitive=False)
-    ] = "fake",
-    yolo_weights: Annotated[
-        Path | None, typer.Option(None, "--yolo-weights", help="Optional YOLO weights path")
-    ] = None,
-    device: Annotated[
-        str | None, typer.Option(None, "--device", help="Device for YOLO (cpu or cuda)")
-    ] = None,
-    tracking: Annotated[
-        str, typer.Option("--tracking", help="Tracking mode", case_sensitive=False)
-    ] = "iou",
-    max_age: Annotated[
-        int, typer.Option("--max-age", help="Max age for tracks in frames")
-    ] = 15,
-    iou_thresh: Annotated[
-        float, typer.Option("--iou-thresh", help="IOU threshold for tracking")
-    ] = 0.3,
-    verbose: Annotated[bool, typer.Option(False, "--verbose", help="Enable debug logging")] = False,
+def run_pipeline(
+    *,
+    input: Path,
+    out: Path,
+    config: Path | None = None,
+    detector: str = "fake",
+    yolo_weights: Path | None = None,
+    device: str | None = None,
+    tracking: str = "iou",
+    max_age: int = 15,
+    iou_thresh: float = 0.3,
+    verbose: bool = False,
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
     logger = _setup_logger(verbose)
@@ -154,6 +137,43 @@ def run(
     cap.release()
     writer.release()
     logger.info("Wrote %d frames to %s", count, out)
+
+
+@app.command()
+def run(
+    input: Path = typer.Option(..., "--input", exists=True, readable=True, help="Input video path"),
+    out: Path = typer.Option(..., "--out", help="Output video path"),
+    config: Path | None = typer.Option(
+        None, "--config", exists=True, readable=True, help="Config path"
+    ),
+    detector: str = typer.Option(
+        "fake", "--detector", help="Detector to use", case_sensitive=False
+    ),
+    yolo_weights: Path | None = typer.Option(
+        None, "--yolo-weights", help="Optional YOLO weights path"
+    ),
+    device: str | None = typer.Option(
+        None, "--device", help="Device for YOLO (cpu or cuda)"
+    ),
+    tracking: str = typer.Option(
+        "iou", "--tracking", help="Tracking mode", case_sensitive=False
+    ),
+    max_age: int = typer.Option(15, "--max-age", help="Max age for tracks in frames"),
+    iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),
+) -> None:
+    run_pipeline(
+        input=input,
+        out=out,
+        config=config,
+        detector=detector,
+        yolo_weights=yolo_weights,
+        device=device,
+        tracking=tracking,
+        max_age=max_age,
+        iou_thresh=iou_thresh,
+        verbose=verbose,
+    )
 
 
 if __name__ == "__main__":
