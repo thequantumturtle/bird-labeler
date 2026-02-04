@@ -152,12 +152,8 @@ def run(
     yolo_weights: Path | None = typer.Option(
         None, "--yolo-weights", help="Optional YOLO weights path"
     ),
-    device: str | None = typer.Option(
-        None, "--device", help="Device for YOLO (cpu or cuda)"
-    ),
-    tracking: str = typer.Option(
-        "iou", "--tracking", help="Tracking mode", case_sensitive=False
-    ),
+    device: str | None = typer.Option(None, "--device", help="Device for YOLO (cpu or cuda)"),
+    tracking: str = typer.Option("iou", "--tracking", help="Tracking mode", case_sensitive=False),
     max_age: int = typer.Option(15, "--max-age", help="Max age for tracks in frames"),
     iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),

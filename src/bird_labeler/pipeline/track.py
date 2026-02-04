@@ -13,8 +13,7 @@ class TrackedDetection:
 
 
 class Tracker(Protocol):
-    def update(self, detections: list[Detection]) -> list[TrackedDetection]:
-        ...
+    def update(self, detections: list[Detection]) -> list[TrackedDetection]: ...
 
 
 def _iou(a: Detection, b: Detection) -> float:
