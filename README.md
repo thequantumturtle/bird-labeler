@@ -30,6 +30,11 @@ Container defaults:
 - Default config resolves to `/workspace/configs/default.yaml` if present.
 - Override with `BIRD_LABELER_CONFIG=/path/to/config.yaml`.
 
+Pre-push formatting:
+
+- Install hooks: `pre-commit install --hook-type pre-push`
+- This runs `ruff format` before `git push`.
+
 Run the CLI:
 
 ```powershell
