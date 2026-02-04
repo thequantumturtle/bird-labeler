@@ -21,11 +21,8 @@ jobs:
         with:
           cache: true
 
-      - name: Create venv
-        run: uv venv
-
       - name: Install deps
-        run: uv pip install -e . --group dev
+        run: uv pip install -e . --group dev --system
 
       - name: Format check
         run: ruff format --check .
