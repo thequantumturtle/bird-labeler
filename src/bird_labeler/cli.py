@@ -7,6 +7,9 @@ from pathlib import Path
 import cv2
 import typer
 
+from bird_labeler.pipeline.classify import FakeClassifier
+from bird_labeler.pipeline.detect import FakeDetector
+
 app = typer.Typer(help="Bird labeling pipeline CLI.")
 
 
@@ -36,6 +39,7 @@ def run(
     config: Path | None = typer.Option(
         None, "--config", exists=True, readable=True, help="Config path"
     ),
+    use_fakes: bool = typer.Option(False, "--use-fakes", help="Use fake detector/classifier"),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
@@ -58,12 +62,31 @@ def run(
 
     max_frames = 30
     count = 0
+    detector = FakeDetector() if use_fakes else None
+    classifier = FakeClassifier() if use_fakes else None
     logger.info("Processing up to %d frames", max_frames)
 
     while count < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
+        if use_fakes and detector and classifier:
+            detections = detector.detect(frame)
+            for det in detections:
+                crop = frame[det.y1 : det.y2, det.x1 : det.x2]
+                labels = classifier.classify(crop)
+                label = labels[0].label if labels else "unknown"
+                cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    label,
+                    (det.x1, max(det.y1 - 5, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
         writer.write(frame)
         count += 1
         if count % 5 == 0:

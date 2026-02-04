@@ -43,3 +43,20 @@ def test_smoke_run(tmp_path: Path) -> None:
 
     assert output_path.exists()
     assert _count_frames(output_path) == 10
+
+
+def test_smoke_run_with_fakes(tmp_path: Path) -> None:
+    input_path = tmp_path / "input.mp4"
+    output_path = tmp_path / "output_fakes.mp4"
+    _write_test_video(input_path, frame_count=10)
+
+    run(
+        input=input_path,
+        out=output_path,
+        config=Path("configs/default.yaml"),
+        use_fakes=True,
+        verbose=False,
+    )
+
+    assert output_path.exists()
+    assert _count_frames(output_path) == 10
