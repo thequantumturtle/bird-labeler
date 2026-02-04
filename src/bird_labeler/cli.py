@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Annotated
 
 import cv2
 import typer
 
 from bird_labeler.pipeline.classify import FakeClassifier
-from bird_labeler.pipeline.detect import FakeDetector
+from bird_labeler.pipeline.detect import FakeDetector, YoloBirdDetector
 
 app = typer.Typer(help="Bird labeling pipeline CLI.")
 
@@ -32,15 +33,34 @@ def _resolve_default_config() -> Path:
     return Path("configs/default.yaml")
 
 
+def _default_device() -> str:
+    try:
+        import torch
+
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
 @app.command()
 def run(
-    input: Path = typer.Option(..., "--input", exists=True, readable=True, help="Input video path"),
-    out: Path = typer.Option(..., "--out", help="Output video path"),
-    config: Path | None = typer.Option(
-        None, "--config", exists=True, readable=True, help="Config path"
-    ),
-    use_fakes: bool = typer.Option(False, "--use-fakes", help="Use fake detector/classifier"),
-    verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),
+    input: Annotated[
+        Path, typer.Option(..., "--input", exists=True, readable=True, help="Input video path")
+    ],
+    out: Annotated[Path, typer.Option(..., "--out", help="Output video path")],
+    config: Annotated[
+        Path | None, typer.Option(None, "--config", exists=True, readable=True, help="Config path")
+    ] = None,
+    detector: Annotated[
+        str, typer.Option("--detector", help="Detector to use", case_sensitive=False)
+    ] = "fake",
+    yolo_weights: Annotated[
+        Path | None, typer.Option(None, "--yolo-weights", help="Optional YOLO weights path")
+    ] = None,
+    device: Annotated[
+        str | None, typer.Option(None, "--device", help="Device for YOLO (cpu or cuda)")
+    ] = None,
+    verbose: Annotated[bool, typer.Option(False, "--verbose", help="Enable debug logging")] = False,
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
     logger = _setup_logger(verbose)
@@ -62,20 +82,34 @@ def run(
 
     max_frames = 30
     count = 0
-    detector = FakeDetector() if use_fakes else None
-    classifier = FakeClassifier() if use_fakes else None
+    detector_choice = detector.lower()
+    if detector_choice not in {"fake", "yolo"}:
+        raise typer.BadParameter("Detector must be one of: fake, yolo")
+    if device and device not in {"cpu", "cuda"}:
+        raise typer.BadParameter("Device must be one of: cpu, cuda")
+    if detector_choice == "yolo":
+        weights = str(yolo_weights) if yolo_weights else "yolov8s.pt"
+        device_name = device or _default_device()
+        detector_impl = YoloBirdDetector(weights=weights, device=device_name)
+        classifier = None
+    else:
+        detector_impl = FakeDetector()
+        classifier = FakeClassifier()
     logger.info("Processing up to %d frames", max_frames)
 
     while count < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
-        if use_fakes and detector and classifier:
-            detections = detector.detect(frame)
+        if detector_impl:
+            detections = detector_impl.detect(frame)
             for det in detections:
                 crop = frame[det.y1 : det.y2, det.x1 : det.x2]
-                labels = classifier.classify(crop)
-                label = labels[0].label if labels else "unknown"
+                if classifier:
+                    labels = classifier.classify(crop)
+                    label = labels[0].label if labels else "unknown"
+                else:
+                    label = "bird"
                 cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
                 cv2.putText(
                     frame,

@@ -40,3 +40,34 @@ class FakeDetector:
             y2 = max(y1 + 1, min(y2, height))
             detections.append(Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=0.5))
         return detections
+
+
+class YoloBirdDetector:
+    def __init__(self, weights: str = "yolov8s.pt", device: str = "cuda") -> None:
+        # Lazy import so tests don't require ultralytics/weights.
+        from ultralytics import YOLO  # type: ignore
+
+        self._model = YOLO(weights)
+        self._device = device
+
+    def detect(self, frame) -> list[Detection]:
+        results = self._model.predict(frame, verbose=False, device=self._device)
+        if not results:
+            return []
+        result = results[0]
+        names = getattr(result, "names", {}) or {}
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            return []
+
+        detections: list[Detection] = []
+        for box in boxes:
+            cls_id = int(box.cls.item())
+            label = names.get(cls_id, "")
+            if label != "bird":
+                continue
+            xyxy = box.xyxy[0].tolist()
+            x1, y1, x2, y2 = [int(round(v)) for v in xyxy]
+            score = float(box.conf.item())
+            detections.append(Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=score))
+        return detections

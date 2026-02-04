@@ -54,7 +54,7 @@ def test_smoke_run_with_fakes(tmp_path: Path) -> None:
         input=input_path,
         out=output_path,
         config=Path("configs/default.yaml"),
-        use_fakes=True,
+        detector="fake",
         verbose=False,
     )
 
