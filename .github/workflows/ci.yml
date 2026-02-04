@@ -22,7 +22,7 @@ jobs:
           cache: true
 
       - name: Install deps
-        run: uv pip install -e . --dev
+        run: uv pip install -e . --group dev
 
       - name: Format check
         run: ruff format --check .
