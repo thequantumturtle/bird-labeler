@@ -1,5 +1,7 @@
 # Bird Labeler
 
+![CI](https://github.com/thequantumturtle/bird-labeler/actions/workflows/ci.yml/badge.svg)
+
 Quickstart (uv):
 
 ```powershell
@@ -7,33 +9,26 @@ Quickstart (uv):
 uv venv
 
 # Install the project in editable mode (include dev deps)
-uv pip install -e . --dev
+uv pip install -e . --group dev
 
 # Run tests
 pytest
 ```
 
-Local dev commands:
+Docker (Windows + GPU):
+
+- Requires Docker Desktop with WSL2 and NVIDIA Container Toolkit (GPU enabled).
+- Build and run:
 
 ```powershell
-just install
-just fmt
-just lint
-just test
-just check
+docker compose -f docker/docker-compose.yml build
+docker compose -f docker/docker-compose.yml run --rm dev
 ```
 
-If `just` is not available:
+Container defaults:
 
-```powershell
-make install
-make fmt
-make lint
-make test
-make check
-```
-
-Before pushing run: `just check` (or `make check`).
+- Default config resolves to `/workspace/configs/default.yaml` if present.
+- Override with `BIRD_LABELER_CONFIG=/path/to/config.yaml`.
 
 Run the CLI:
 

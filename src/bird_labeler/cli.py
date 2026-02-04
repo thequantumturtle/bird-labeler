@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import cv2
@@ -18,17 +19,29 @@ def _setup_logger(verbose: bool) -> logging.Logger:
     return logging.getLogger("bird_labeler")
 
 
+def _resolve_default_config() -> Path:
+    env_path = os.getenv("BIRD_LABELER_CONFIG")
+    if env_path:
+        return Path(env_path)
+    workspace_path = Path("/workspace/configs/default.yaml")
+    if workspace_path.exists():
+        return workspace_path
+    return Path("configs/default.yaml")
+
+
 @app.command()
 def run(
     input: Path = typer.Option(..., "--input", exists=True, readable=True, help="Input video path"),
     out: Path = typer.Option(..., "--out", help="Output video path"),
-    config: Path = typer.Option(
-        Path("configs/default.yaml"), "--config", exists=True, readable=True, help="Config path"
+    config: Path | None = typer.Option(
+        None, "--config", exists=True, readable=True, help="Config path"
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
     logger = _setup_logger(verbose)
+    if config is None:
+        config = _resolve_default_config()
     logger.info("Loading config: %s", config)
 
     cap = cv2.VideoCapture(str(input))
