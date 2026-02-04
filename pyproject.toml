@@ -34,7 +34,6 @@ line-length = 100
 select = ["E", "F", "I"]
 
 [tool.ruff.format]
-line-length = 100
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
