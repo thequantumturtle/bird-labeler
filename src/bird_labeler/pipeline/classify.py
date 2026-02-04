@@ -11,8 +11,7 @@ class LabelScore:
 
 
 class Classifier(Protocol):
-    def classify(self, crop) -> list[LabelScore]:
-        ...
+    def classify(self, crop) -> list[LabelScore]: ...
 
 
 class FakeClassifier:

@@ -14,8 +14,7 @@ class Detection:
 
 
 class Detector(Protocol):
-    def detect(self, frame) -> list[Detection]:
-        ...
+    def detect(self, frame) -> list[Detection]: ...
 
 
 class FakeDetector:
