@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 import typer
 
-from bird_labeler.pipeline.classify import FakeClassifier
+from bird_labeler.pipeline.classify import FakeClassifier, HfBirdClassifier
 from bird_labeler.pipeline.detect import FakeDetector, YoloBirdDetector
 from bird_labeler.pipeline.track import IouTracker
 
@@ -83,6 +83,9 @@ def run_pipeline(
     yolo_weights: Path | None = None,
     device: str | None = None,
     imgsz: int = 640,
+    classifier: str = "off",
+    classifier_model: str | None = None,
+    classifier_device: str | None = None,
     tracking: str = "iou",
     max_age: int = 15,
     iou_thresh: float = 0.3,
@@ -136,14 +139,28 @@ def run_pipeline(
         weights = str(yolo_weights) if yolo_weights else "yolov8s.pt"
         device_name = device or _default_device()
         detector_impl = YoloBirdDetector(weights=weights, device=device_name, imgsz=imgsz)
-        classifier = None
     else:
         detector_impl = FakeDetector()
-        classifier = FakeClassifier()
+    classifier_choice = classifier.lower()
+    if classifier_choice not in {"off", "fake", "cub200", "hf"}:
+        raise typer.BadParameter("Classifier must be one of: off, fake, cub200, hf")
+    if classifier_choice == "off":
+        classifier_impl = None
+    elif classifier_choice == "fake":
+        classifier_impl = FakeClassifier()
+    else:
+        model_id = classifier_model
+        if classifier_choice == "cub200":
+            model_id = model_id or "Emiel/cub-200-bird-classifier-swin"
+        if not model_id:
+            raise typer.BadParameter("Classifier model is required for hf classifier")
+        classifier_device_name = classifier_device or device or _default_device()
+        classifier_impl = HfBirdClassifier(model_id=model_id, device=classifier_device_name)
     tracker = None
     if tracking_choice == "iou":
         tracker = IouTracker(max_age=max_age, iou_thresh=iou_thresh)
     last_classify_time: dict[int, float] = {}
+    last_label: dict[int, str] = {}
     frame_idx = 0
     logger.info("Processing up to %d frames", max_frames)
 
@@ -159,30 +176,27 @@ def run_pipeline(
             tracked = tracker.update(detections) if tracker else None
             for det in detections:
                 crop = frame[det.y1 : det.y2, det.x1 : det.x2]
-                label = "bird"
-                if classifier:
-                    track_id = None
-                    if tracked:
-                        for item in tracked:
-                            if item.detection == det:
-                                track_id = item.track_id
-                                break
-                    if track_id is None:
-                        labels = classifier.classify(crop)
-                        label = labels[0].label if labels else "unknown"
-                    else:
-                        now = frame_idx / fps
-                        last_time = last_classify_time.get(track_id, -1.0)
-                        if now - last_time >= classify_every_seconds:
-                            labels = classifier.classify(crop)
-                            label = labels[0].label if labels else "unknown"
-                            last_classify_time[track_id] = now
                 track_id = None
                 if tracked:
                     for item in tracked:
                         if item.detection == det:
                             track_id = item.track_id
                             break
+                label = "bird"
+                if classifier_impl:
+                    if track_id is None or classify_every_seconds <= 0:
+                        labels = classifier_impl.classify(crop)
+                        label = labels[0].label if labels else "unknown"
+                    else:
+                        now = frame_idx / fps
+                        last_time = last_classify_time.get(track_id, -1.0)
+                        if now - last_time >= classify_every_seconds or track_id not in last_label:
+                            labels = classifier_impl.classify(crop)
+                            label = labels[0].label if labels else "unknown"
+                            last_classify_time[track_id] = now
+                            last_label[track_id] = label
+                        else:
+                            label = last_label[track_id]
                 if track_id is not None:
                     label = f"{label} #{track_id}"
                 cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
@@ -230,6 +244,15 @@ def run(
     classify_every_seconds: float = typer.Option(
         1.0, "--classify-every-seconds", help="Per-track classification interval"
     ),
+    classifier: str = typer.Option(
+        "off", "--classifier", help="Classifier to use", case_sensitive=False
+    ),
+    classifier_model: str | None = typer.Option(
+        None, "--classifier-model", help="Hugging Face model id for classifier"
+    ),
+    classifier_device: str | None = typer.Option(
+        None, "--classifier-device", help="Device for classifier (cpu or cuda)"
+    ),
     max_frames: int | None = typer.Option(
         None, "--max-frames", help="Maximum number of processed frames"
     ),
@@ -246,6 +269,9 @@ def run(
         yolo_weights=yolo_weights,
         device=device,
         imgsz=imgsz,
+        classifier=classifier,
+        classifier_model=classifier_model,
+        classifier_device=classifier_device,
         tracking=tracking,
         max_age=max_age,
         iou_thresh=iou_thresh,

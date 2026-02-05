@@ -27,6 +27,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 WORKDIR /workspace
 COPY . /workspace
-RUN uv pip install -e . --group dev
+RUN uv pip install -e . --group dev --group classifiers
 
 CMD ["bird-labeler", "--help"]

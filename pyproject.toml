@@ -22,6 +22,7 @@ bird-labeler = "bird_labeler.cli:app"
 
 [dependency-groups]
 dev = ["pytest", "ruff", "pre-commit"]
+classifiers = ["transformers", "Pillow"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

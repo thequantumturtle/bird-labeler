@@ -50,3 +50,9 @@ Weights cache:
 
 - Place YOLO weights in `weights/` (e.g. `weights/yolov8s.pt`).
 - Use `--yolo-weights /workspace/weights/yolov8s.pt` to avoid re-downloads.
+
+Species classification (CUB-200):
+
+- Install extra deps: `uv pip install -e . --group classifiers`
+- Enable classifier: `--classifier cub200`
+- Override model: `--classifier hf --classifier-model <model-id>`
