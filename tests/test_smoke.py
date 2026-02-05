@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import cv2
 import numpy as np
-import re
-
 from typer.testing import CliRunner
 
 from bird_labeler.cli import app, run_pipeline
