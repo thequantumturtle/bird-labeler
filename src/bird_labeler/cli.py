@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -42,6 +44,36 @@ def _default_device() -> str:
         return "cpu"
 
 
+def _reencode_h264(path: Path, logger: logging.Logger) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        logger.warning("ffmpeg not found; skipping H.264 re-encode")
+        return
+    tmp_path = path.with_suffix(".h264.mp4")
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(path),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(tmp_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.warning("ffmpeg re-encode failed; keeping original output")
+        return
+    try:
+        tmp_path.replace(path)
+        logger.info("Re-encoded output to H.264 for preview compatibility")
+    except OSError:
+        logger.warning("Failed to replace output with H.264 version")
+
+
 def run_pipeline(
     *,
     input: Path,
@@ -56,6 +88,7 @@ def run_pipeline(
     iou_thresh: float = 0.3,
     process_fps: float = 15.0,
     classify_every_seconds: float = 1.0,
+    max_frames: int | None = None,
     verbose: bool = False,
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
@@ -73,14 +106,23 @@ def run_pipeline(
         fps = 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
     out.parent.mkdir(parents=True, exist_ok=True)
     step = max(1, int(round(fps / process_fps))) if process_fps > 0 else 1
     out_fps = fps / step
-    writer = cv2.VideoWriter(str(out), fourcc, out_fps, (width, height))
+    writer = None
+    chosen_codec = None
+    for codec in ("avc1", "H264", "mp4v"):
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        candidate = cv2.VideoWriter(str(out), fourcc, out_fps, (width, height))
+        if candidate.isOpened():
+            writer = candidate
+            chosen_codec = codec
+            logger.info("Using video codec: %s", codec)
+            break
+    if writer is None:
+        raise typer.Exit(code=1)
 
-    max_frames = 30
+    max_frames = max_frames if max_frames is not None else -1
     count = 0
     detector_choice = detector.lower()
     if detector_choice not in {"fake", "yolo"}:
@@ -105,7 +147,7 @@ def run_pipeline(
     frame_idx = 0
     logger.info("Processing up to %d frames", max_frames)
 
-    while count < max_frames:
+    while max_frames < 0 or count < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
@@ -162,6 +204,8 @@ def run_pipeline(
 
     cap.release()
     writer.release()
+    if chosen_codec == "mp4v":
+        _reencode_h264(out, logger)
     logger.info("Wrote %d frames to %s", count, out)
 
 
@@ -186,6 +230,9 @@ def run(
     classify_every_seconds: float = typer.Option(
         1.0, "--classify-every-seconds", help="Per-track classification interval"
     ),
+    max_frames: int | None = typer.Option(
+        None, "--max-frames", help="Maximum number of processed frames"
+    ),
     tracking: str = typer.Option("iou", "--tracking", help="Tracking mode", case_sensitive=False),
     max_age: int = typer.Option(15, "--max-age", help="Max age for tracks in frames"),
     iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
@@ -204,6 +251,7 @@ def run(
         iou_thresh=iou_thresh,
         process_fps=process_fps,
         classify_every_seconds=classify_every_seconds,
+        max_frames=max_frames,
         verbose=verbose,
     )
 
