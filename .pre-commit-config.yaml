@@ -10,4 +10,4 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
 
-default_stages: [commit, push]
+default_stages: [pre-commit, pre-push]
