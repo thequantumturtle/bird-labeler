@@ -43,15 +43,16 @@ class FakeDetector:
 
 
 class YoloBirdDetector:
-    def __init__(self, weights: str = "yolov8s.pt", device: str = "cuda") -> None:
+    def __init__(self, weights: str = "yolov8s.pt", device: str = "cuda", imgsz: int = 640) -> None:
         # Lazy import so tests don't require ultralytics/weights.
         from ultralytics import YOLO  # type: ignore
 
         self._model = YOLO(weights)
         self._device = device
+        self._imgsz = imgsz
 
     def detect(self, frame) -> list[Detection]:
-        results = self._model.predict(frame, verbose=False, device=self._device)
+        results = self._model.predict(frame, verbose=False, device=self._device, imgsz=self._imgsz)
         if not results:
             return []
         result = results[0]

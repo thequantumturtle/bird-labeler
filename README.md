@@ -41,3 +41,7 @@ Run the CLI:
 bird-labeler --help
 bird-labeler run --input path\to\input.mp4 --out path\to\output.mp4 --config configs\default.yaml
 ```
+
+Recommended near real-time settings (RTX 3080 Ti):
+
+- `--detector yolo --device cuda --imgsz 640 --process-fps 15 --tracking iou --max-age 15 --iou-thresh 0.3 --classify-every-seconds 1.0`

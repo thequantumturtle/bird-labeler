@@ -50,9 +50,12 @@ def run_pipeline(
     detector: str = "fake",
     yolo_weights: Path | None = None,
     device: str | None = None,
+    imgsz: int = 640,
     tracking: str = "iou",
     max_age: int = 15,
     iou_thresh: float = 0.3,
+    process_fps: float = 15.0,
+    classify_every_seconds: float = 1.0,
     verbose: bool = False,
 ) -> None:
     """Smoke pipeline: copy up to 30 frames from input to output."""
@@ -66,12 +69,16 @@ def run_pipeline(
         raise typer.Exit(code=1)
 
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(out), fourcc, fps, (width, height))
+    step = max(1, int(round(fps / process_fps))) if process_fps > 0 else 1
+    out_fps = fps / step
+    writer = cv2.VideoWriter(str(out), fourcc, out_fps, (width, height))
 
     max_frames = 30
     count = 0
@@ -86,7 +93,7 @@ def run_pipeline(
     if detector_choice == "yolo":
         weights = str(yolo_weights) if yolo_weights else "yolov8s.pt"
         device_name = device or _default_device()
-        detector_impl = YoloBirdDetector(weights=weights, device=device_name)
+        detector_impl = YoloBirdDetector(weights=weights, device=device_name, imgsz=imgsz)
         classifier = None
     else:
         detector_impl = FakeDetector()
@@ -94,22 +101,40 @@ def run_pipeline(
     tracker = None
     if tracking_choice == "iou":
         tracker = IouTracker(max_age=max_age, iou_thresh=iou_thresh)
+    last_classify_time: dict[int, float] = {}
+    frame_idx = 0
     logger.info("Processing up to %d frames", max_frames)
 
     while count < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
+        if step > 1 and (frame_idx % step) != 0:
+            frame_idx += 1
+            continue
         if detector_impl:
             detections = detector_impl.detect(frame)
             tracked = tracker.update(detections) if tracker else None
             for det in detections:
                 crop = frame[det.y1 : det.y2, det.x1 : det.x2]
+                label = "bird"
                 if classifier:
-                    labels = classifier.classify(crop)
-                    label = labels[0].label if labels else "unknown"
-                else:
-                    label = "bird"
+                    track_id = None
+                    if tracked:
+                        for item in tracked:
+                            if item.detection == det:
+                                track_id = item.track_id
+                                break
+                    if track_id is None:
+                        labels = classifier.classify(crop)
+                        label = labels[0].label if labels else "unknown"
+                    else:
+                        now = frame_idx / fps
+                        last_time = last_classify_time.get(track_id, -1.0)
+                        if now - last_time >= classify_every_seconds:
+                            labels = classifier.classify(crop)
+                            label = labels[0].label if labels else "unknown"
+                            last_classify_time[track_id] = now
                 track_id = None
                 if tracked:
                     for item in tracked:
@@ -131,6 +156,7 @@ def run_pipeline(
                 )
         writer.write(frame)
         count += 1
+        frame_idx += 1
         if count % 5 == 0:
             logger.info("Processed %d frames", count)
 
@@ -153,6 +179,13 @@ def run(
         None, "--yolo-weights", help="Optional YOLO weights path"
     ),
     device: str | None = typer.Option(None, "--device", help="Device for YOLO (cpu or cuda)"),
+    process_fps: float = typer.Option(
+        15.0, "--process-fps", help="Target processing FPS (drops frames)"
+    ),
+    imgsz: int = typer.Option(640, "--imgsz", help="YOLO inference image size"),
+    classify_every_seconds: float = typer.Option(
+        1.0, "--classify-every-seconds", help="Per-track classification interval"
+    ),
     tracking: str = typer.Option("iou", "--tracking", help="Tracking mode", case_sensitive=False),
     max_age: int = typer.Option(15, "--max-age", help="Max age for tracks in frames"),
     iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
@@ -165,9 +198,12 @@ def run(
         detector=detector,
         yolo_weights=yolo_weights,
         device=device,
+        imgsz=imgsz,
         tracking=tracking,
         max_age=max_age,
         iou_thresh=iou_thresh,
+        process_fps=process_fps,
+        classify_every_seconds=classify_every_seconds,
         verbose=verbose,
     )
 
