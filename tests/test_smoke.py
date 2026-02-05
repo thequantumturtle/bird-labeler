@@ -4,7 +4,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from typer.testing import CliRunner
 
 from bird_labeler.cli import app, run_pipeline
