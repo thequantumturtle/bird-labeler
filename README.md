@@ -45,3 +45,8 @@ bird-labeler run --input path\to\input.mp4 --out path\to\output.mp4 --config con
 Recommended near real-time settings (RTX 3080 Ti):
 
 - `--detector yolo --device cuda --imgsz 640 --process-fps 15 --tracking iou --max-age 15 --iou-thresh 0.3 --classify-every-seconds 1.0`
+
+Weights cache:
+
+- Place YOLO weights in `weights/` (e.g. `weights/yolov8s.pt`).
+- Use `--yolo-weights /workspace/weights/yolov8s.pt` to avoid re-downloads.

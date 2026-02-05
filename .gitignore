@@ -24,3 +24,6 @@ Thumbs.db
 outputs/
 *.mp4
 *.avi
+
+# Model weights
+weights/
