@@ -4,6 +4,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import re
+
 from typer.testing import CliRunner
 
 from bird_labeler.cli import app, run_pipeline
@@ -72,4 +74,5 @@ def test_cli_help() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["--help"], prog_name="bird-labeler")
     assert result.exit_code == 0
-    assert "Usage: bird-labeler" in result.output
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "Usage: bird-labeler" in output
