@@ -29,8 +29,8 @@ class FakeClassifier:
 
 class HfBirdClassifier:
     def __init__(self, model_id: str, device: str | None = None) -> None:
-        from transformers import AutoImageProcessor, AutoModelForImageClassification  # type: ignore
         import torch
+        from transformers import AutoImageProcessor, AutoModelForImageClassification  # type: ignore
 
         self._torch = torch
         self._device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
