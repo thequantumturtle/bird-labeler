@@ -50,6 +50,13 @@ Weights cache:
 
 - Place YOLO weights in `weights/` (e.g. `weights/yolov8s.pt`).
 - Use `--yolo-weights /workspace/weights/yolov8s.pt` to avoid re-downloads.
+- Hugging Face cache is persisted via the `hf-cache` Docker volume.
+- Optional warm-up (runs once, then reuses cache):
+
+```powershell
+docker compose -f docker/docker-compose.yml run --rm dev `
+  python3.11 -c "from huggingface_hub import snapshot_download; snapshot_download('Emiel/cub-200-bird-classifier-swin')"
+```
 
 Species classification (CUB-200):
 

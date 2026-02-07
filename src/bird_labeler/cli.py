@@ -15,6 +15,10 @@ from bird_labeler.pipeline.track import IouTracker
 
 app = typer.Typer(help="Bird labeling pipeline CLI.")
 
+_FONT = cv2.FONT_HERSHEY_SIMPLEX
+_FONT_SCALE = 0.5
+_FONT_THICKNESS = 1
+
 
 def _setup_logger(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
@@ -74,6 +78,52 @@ def _reencode_h264(path: Path, logger: logging.Logger) -> None:
         logger.warning("Failed to replace output with H.264 version")
 
 
+def _label_metrics(text: str) -> tuple[int, int, int]:
+    (tw, th), baseline = cv2.getTextSize(text, _FONT, _FONT_SCALE, _FONT_THICKNESS)
+    return tw, th, baseline
+
+
+def _draw_label(
+    frame,
+    text: str,
+    x: int,
+    y: int,
+    text_color: tuple[int, int, int],
+    bg_color: tuple[int, int, int],
+) -> None:
+    tw, th, baseline = _label_metrics(text)
+    height, width = frame.shape[:2]
+    x0 = max(0, min(x, max(0, width - (tw + 4))))
+    y_min = th + baseline
+    y_max = max(y_min, height - 1 - baseline)
+    y0 = max(y_min, min(y, y_max))
+    cv2.rectangle(
+        frame,
+        (x0, y0 - th - baseline),
+        (x0 + tw + 4, y0 + baseline),
+        bg_color,
+        -1,
+    )
+    cv2.putText(
+        frame,
+        text,
+        (x0 + 2, y0),
+        _FONT,
+        _FONT_SCALE,
+        text_color,
+        _FONT_THICKNESS,
+        cv2.LINE_AA,
+    )
+
+
+def _expand_box(det, pad: int, width: int, height: int) -> tuple[int, int, int, int]:
+    x1 = max(0, det.x1 - pad)
+    y1 = max(0, det.y1 - pad)
+    x2 = min(width, det.x2 + pad)
+    y2 = min(height, det.y2 + pad)
+    return x1, y1, x2, y2
+
+
 def run_pipeline(
     *,
     input: Path,
@@ -92,9 +142,10 @@ def run_pipeline(
     process_fps: float = 15.0,
     classify_every_seconds: float = 1.0,
     max_frames: int | None = None,
+    diagnostic_overlay: bool = False,
     verbose: bool = False,
 ) -> None:
-    """Smoke pipeline: copy up to 30 frames from input to output."""
+    """Run detection/tracking/classification and write a labeled output video."""
     logger = _setup_logger(verbose)
     if config is None:
         config = _resolve_default_config()
@@ -173,7 +224,42 @@ def run_pipeline(
             continue
         if detector_impl:
             detections = detector_impl.detect(frame)
-            tracked = tracker.update(detections) if tracker else None
+            tracked = None
+            dropped = []
+            if tracker:
+                if hasattr(tracker, "update_with_dropped"):
+                    tracked, dropped = tracker.update_with_dropped(detections)
+                else:
+                    tracked = tracker.update(detections)
+            if diagnostic_overlay:
+                overlay = frame.copy()
+                for det in detections:
+                    x1, y1, x2, y2 = _expand_box(det, 10, width, height)
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), 4)
+                for det in dropped:
+                    cv2.rectangle(overlay, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 255), 20)
+                cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
+                for det in dropped:
+                    text = f"{det.score:.2f}"
+                    tw, _, _ = _label_metrics(text)
+                    right_x = det.x2 - tw - 6
+                    _draw_label(
+                        frame,
+                        text,
+                        right_x,
+                        det.y1 + 10,
+                        (0, 0, 0),
+                        (0, 255, 255),
+                    )
+                for det in detections:
+                    _draw_label(
+                        frame,
+                        f"{det.score:.2f}",
+                        det.x1 + 6,
+                        det.y1,
+                        (255, 255, 255),
+                        (0, 0, 255),
+                    )
             for det in detections:
                 crop = frame[det.y1 : det.y2, det.x1 : det.x2]
                 track_id = None
@@ -198,17 +284,15 @@ def run_pipeline(
                         else:
                             label = last_label[track_id]
                 if track_id is not None:
-                    label = f"{label} #{track_id}"
+                    label = f"{label} #{track_id} ({det.score:.2f})"
                 cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
-                cv2.putText(
+                _draw_label(
                     frame,
                     label,
-                    (det.x1, max(det.y1 - 5, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA,
+                    det.x1,
+                    det.y2 + 12,
+                    (255, 255, 255),
+                    (0, 128, 0),
                 )
         writer.write(frame)
         count += 1
@@ -256,6 +340,9 @@ def run(
     max_frames: int | None = typer.Option(
         None, "--max-frames", help="Maximum number of processed frames"
     ),
+    diagnostic_overlay: bool = typer.Option(
+        False, "--diagnostic-overlay", help="Show raw/tracked/dropped boxes"
+    ),
     tracking: str = typer.Option("iou", "--tracking", help="Tracking mode", case_sensitive=False),
     max_age: int = typer.Option(15, "--max-age", help="Max age for tracks in frames"),
     iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
@@ -278,6 +365,7 @@ def run(
         process_fps=process_fps,
         classify_every_seconds=classify_every_seconds,
         max_frames=max_frames,
+        diagnostic_overlay=diagnostic_overlay,
         verbose=verbose,
     )
 

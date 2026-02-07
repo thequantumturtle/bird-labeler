@@ -6,8 +6,12 @@ services:
     working_dir: /workspace
     volumes:
       - ..:/workspace
+      - hf-cache:/cache/hf
     environment:
       - BIRD_LABELER_CONFIG=/workspace/configs/default.yaml
+      - HF_HOME=/cache/hf
+      - HUGGINGFACE_HUB_CACHE=/cache/hf/hub
+      - TRANSFORMERS_CACHE=/cache/hf/transformers
     command: bash
     deploy:
       resources:
@@ -16,3 +20,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+volumes:
+  hf-cache:

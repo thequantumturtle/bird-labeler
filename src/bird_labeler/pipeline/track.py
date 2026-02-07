@@ -45,6 +45,12 @@ class IouTracker:
         self._tracks: list[_TrackState] = []
 
     def update(self, detections: list[Detection]) -> list[TrackedDetection]:
+        tracked, _ = self.update_with_dropped(detections)
+        return tracked
+
+    def update_with_dropped(
+        self, detections: list[Detection]
+    ) -> tuple[list[TrackedDetection], list[Detection]]:
         matched_tracks: set[int] = set()
         matched_dets: set[int] = set()
 
@@ -80,7 +86,9 @@ class IouTracker:
             self._tracks.append(_TrackState(track_id=self._next_id, detection=det, age=0))
             self._next_id += 1
 
-        return [
+        tracked = [
             TrackedDetection(detection=track.detection, track_id=track.track_id)
             for track in self._tracks
         ]
+        dropped = [det for d_idx, det in enumerate(detections) if d_idx not in matched_dets]
+        return tracked, dropped
