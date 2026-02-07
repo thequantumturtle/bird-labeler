@@ -39,9 +39,7 @@ class FakeDetector:
             y1 = max(0, min(y1, height - 1))
             x2 = max(x1 + 1, min(x2, width))
             y2 = max(y1 + 1, min(y2, height))
-            detections.append(
-                Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=0.5, class_name="bird")
-            )
+            detections.append(Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=0.5, class_name="bird"))
         return detections
 
 
@@ -84,7 +82,5 @@ class YoloBirdDetector:
             score = float(box.conf.item())
             if score < self._conf:
                 continue
-            detections.append(
-                Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=score, class_name=label)
-            )
+            detections.append(Detection(x1=x1, y1=y1, x2=x2, y2=y2, score=score, class_name=label))
         return detections
