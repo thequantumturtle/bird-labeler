@@ -1,4 +1,5 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# syntax=docker/dockerfile:1.6
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV UV_SYSTEM_PYTHON=1
@@ -25,8 +26,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
+FROM base AS deps
 WORKDIR /workspace
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -e . --group dev --group classifiers
+
+FROM base AS runtime
+WORKDIR /workspace
+COPY --from=deps /usr/local /usr/local
 COPY . /workspace
-RUN uv pip install -e . --group dev --group classifiers
 
 CMD ["bird-labeler", "--help"]
