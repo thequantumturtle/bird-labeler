@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -18,6 +20,18 @@ app = typer.Typer(help="Bird labeling pipeline CLI.")
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
 _FONT_SCALE = 0.5
 _FONT_THICKNESS = 1
+_ANIMAL_CLASSES = {
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+}
 
 
 def _setup_logger(verbose: bool) -> logging.Logger:
@@ -78,6 +92,45 @@ def _reencode_h264(path: Path, logger: logging.Logger) -> None:
         logger.warning("Failed to replace output with H.264 version")
 
 
+def _git_sha() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        sha = result.stdout.strip()
+        return sha if sha else None
+    except Exception:
+        return None
+
+
+def _build_run_tag(parts: dict[str, str]) -> str:
+    ordered_keys = [
+        "detector",
+        "weights",
+        "imgsz",
+        "conf",
+        "classes",
+        "tracking",
+        "classifier",
+        "process_fps",
+    ]
+    tokens = []
+    for key in ordered_keys:
+        value = parts.get(key)
+        if not value:
+            continue
+        tokens.append(f"{key}-{value}")
+    return "_".join(tokens)
+
+
+def _write_sidecar(path: Path, payload: dict) -> None:
+    sidecar = path.with_suffix(path.suffix + ".json")
+    sidecar.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _label_metrics(text: str) -> tuple[int, int, int]:
     (tw, th), baseline = cv2.getTextSize(text, _FONT, _FONT_SCALE, _FONT_THICKNESS)
     return tw, th, baseline
@@ -133,6 +186,10 @@ def run_pipeline(
     yolo_weights: Path | None = None,
     device: str | None = None,
     imgsz: int = 640,
+    yolo_conf: float = 0.25,
+    yolo_classes: str = "bird",
+    diagnostic_all_classes: bool = False,
+    auto_tag_out: bool = False,
     classifier: str = "off",
     classifier_model: str | None = None,
     classifier_device: str | None = None,
@@ -160,22 +217,6 @@ def run_pipeline(
         fps = 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    step = max(1, int(round(fps / process_fps))) if process_fps > 0 else 1
-    out_fps = fps / step
-    writer = None
-    chosen_codec = None
-    for codec in ("avc1", "H264", "mp4v"):
-        fourcc = cv2.VideoWriter_fourcc(*codec)
-        candidate = cv2.VideoWriter(str(out), fourcc, out_fps, (width, height))
-        if candidate.isOpened():
-            writer = candidate
-            chosen_codec = codec
-            logger.info("Using video codec: %s", codec)
-            break
-    if writer is None:
-        raise typer.Exit(code=1)
-
     max_frames = max_frames if max_frames is not None else -1
     count = 0
     detector_choice = detector.lower()
@@ -186,10 +227,29 @@ def run_pipeline(
     tracking_choice = tracking.lower()
     if tracking_choice not in {"off", "iou"}:
         raise typer.BadParameter("Tracking must be one of: off, iou")
+    weights = None
     if detector_choice == "yolo":
         weights = str(yolo_weights) if yolo_weights else "yolov8s.pt"
         device_name = device or _default_device()
-        detector_impl = YoloBirdDetector(weights=weights, device=device_name, imgsz=imgsz)
+        if diagnostic_all_classes:
+            allowed_classes = None
+        else:
+            classes_input = yolo_classes.strip().lower()
+            if classes_input in {"all", "*"}:
+                allowed_classes = None
+            elif classes_input in {"animal", "animals"}:
+                allowed_classes = set(_ANIMAL_CLASSES)
+            else:
+                allowed_classes = {c.strip() for c in classes_input.split(",") if c.strip()}
+            if not allowed_classes:
+                raise typer.BadParameter("YOLO classes must be a non-empty list or 'all'")
+        detector_impl = YoloBirdDetector(
+            weights=weights,
+            device=device_name,
+            imgsz=imgsz,
+            conf=yolo_conf,
+            allowed_classes=allowed_classes,
+        )
     else:
         detector_impl = FakeDetector()
     classifier_choice = classifier.lower()
@@ -212,6 +272,38 @@ def run_pipeline(
         tracker = IouTracker(max_age=max_age, iou_thresh=iou_thresh)
     last_classify_time: dict[int, float] = {}
     last_label: dict[int, str] = {}
+    if auto_tag_out:
+        class_token = "all" if diagnostic_all_classes else yolo_classes.replace(",", "-")
+        tag_parts = {
+            "detector": detector_choice,
+            "weights": Path(weights).stem if detector_choice == "yolo" and weights else "fake",
+            "imgsz": str(imgsz) if detector_choice == "yolo" else "",
+            "conf": f"{yolo_conf:.2f}" if detector_choice == "yolo" else "",
+            "classes": class_token if detector_choice == "yolo" else "",
+            "tracking": tracking_choice,
+            "classifier": classifier_choice,
+            "process_fps": f"{process_fps:.0f}",
+        }
+        run_tag = _build_run_tag(tag_parts)
+        if run_tag:
+            out = out.with_name(f"{out.stem}_{run_tag}{out.suffix}")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    step = max(1, int(round(fps / process_fps))) if process_fps > 0 else 1
+    out_fps = fps / step
+    writer = None
+    chosen_codec = None
+    for codec in ("avc1", "H264", "mp4v"):
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        candidate = cv2.VideoWriter(str(out), fourcc, out_fps, (width, height))
+        if candidate.isOpened():
+            writer = candidate
+            chosen_codec = codec
+            logger.info("Using video codec: %s", codec)
+            break
+    if writer is None:
+        raise typer.Exit(code=1)
+
     frame_idx = 0
     logger.info("Processing up to %d frames", max_frames)
 
@@ -254,7 +346,7 @@ def run_pipeline(
                 for det in detections:
                     _draw_label(
                         frame,
-                        f"{det.score:.2f}",
+                        f"{det.class_name} {det.score:.2f}",
                         det.x1 + 6,
                         det.y1,
                         (255, 255, 255),
@@ -306,6 +398,35 @@ def run_pipeline(
         _reencode_h264(out, logger)
     logger.info("Wrote %d frames to %s", count, out)
 
+    metadata = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "git_sha": _git_sha(),
+        "input": str(input),
+        "output": str(out),
+        "config": str(config),
+        "detector": detector_choice,
+        "yolo_weights": str(weights) if detector_choice == "yolo" and weights else None,
+        "yolo_conf": yolo_conf if detector_choice == "yolo" else None,
+        "yolo_classes": "all" if diagnostic_all_classes else yolo_classes,
+        "imgsz": imgsz if detector_choice == "yolo" else None,
+        "device": device or _default_device(),
+        "classifier": classifier_choice,
+        "classifier_model": classifier_model,
+        "classifier_device": classifier_device,
+        "tracking": tracking_choice,
+        "max_age": max_age,
+        "iou_thresh": iou_thresh,
+        "process_fps": process_fps,
+        "classify_every_seconds": classify_every_seconds,
+        "max_frames": max_frames,
+        "diagnostic_overlay": diagnostic_overlay,
+        "diagnostic_all_classes": diagnostic_all_classes,
+        "frame_count": count,
+        "output_fps": out_fps,
+        "output_codec": chosen_codec,
+    }
+    _write_sidecar(out, metadata)
+
 
 @app.command()
 def run(
@@ -325,6 +446,24 @@ def run(
         15.0, "--process-fps", help="Target processing FPS (drops frames)"
     ),
     imgsz: int = typer.Option(640, "--imgsz", help="YOLO inference image size"),
+    yolo_conf: float = typer.Option(
+        0.25, "--yolo-conf", help="YOLO confidence threshold (lower = more detections)"
+    ),
+    yolo_classes: str = typer.Option(
+        "bird",
+        "--yolo-classes",
+        help="Allowed YOLO classes (comma list, or 'animals', or 'all')",
+    ),
+    diagnostic_all_classes: bool = typer.Option(
+        False,
+        "--diagnostic-all-classes",
+        help="Override class filter and show all YOLO classes in diagnostic overlay",
+    ),
+    auto_tag_out: bool = typer.Option(
+        False,
+        "--auto-tag-out",
+        help="Append a short parameter tag to the output filename",
+    ),
     classify_every_seconds: float = typer.Option(
         1.0, "--classify-every-seconds", help="Per-track classification interval"
     ),
@@ -356,6 +495,10 @@ def run(
         yolo_weights=yolo_weights,
         device=device,
         imgsz=imgsz,
+        yolo_conf=yolo_conf,
+        yolo_classes=yolo_classes,
+        diagnostic_all_classes=diagnostic_all_classes,
+        auto_tag_out=auto_tag_out,
         classifier=classifier,
         classifier_model=classifier_model,
         classifier_device=classifier_device,
