@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import typer
 
 from bird_labeler.pipeline.classify import FakeClassifier, HfBirdClassifier
 from bird_labeler.pipeline.detect import FakeDetector, YoloBirdDetector
+from bird_labeler.pipeline.ingest import normalize_av
 from bird_labeler.pipeline.track import IouTracker
 
 app = typer.Typer(help="Bird labeling pipeline CLI.")
@@ -180,6 +182,7 @@ def _expand_box(det, pad: int, width: int, height: int) -> tuple[int, int, int, 
 def run_pipeline(
     *,
     input: Path,
+    source_input: Path | None = None,
     out: Path,
     config: Path | None = None,
     detector: str = "fake",
@@ -290,7 +293,7 @@ def run_pipeline(
 
     out.parent.mkdir(parents=True, exist_ok=True)
     step = max(1, int(round(fps / process_fps))) if process_fps > 0 else 1
-    out_fps = fps / step
+    out_fps = fps
     writer = None
     chosen_codec = None
     for codec in ("avc1", "H264", "mp4v"):
@@ -305,53 +308,29 @@ def run_pipeline(
         raise typer.Exit(code=1)
 
     frame_idx = 0
+    processed_count = 0
+    last_render: list[tuple[object, str]] = []
+    last_raw: list[object] = []
+    last_dropped: list[object] = []
     logger.info("Processing up to %d frames", max_frames)
 
-    while max_frames < 0 or count < max_frames:
+    while max_frames < 0 or processed_count < max_frames:
         ok, frame = cap.read()
         if not ok:
             break
-        if step > 1 and (frame_idx % step) != 0:
-            frame_idx += 1
-            continue
-        if detector_impl:
+        process_this = step <= 1 or (frame_idx % step) == 0
+        if detector_impl and process_this:
             detections = detector_impl.detect(frame)
             tracked = None
-            dropped = []
+            dropped: list[object] = []
             if tracker:
                 if hasattr(tracker, "update_with_dropped"):
                     tracked, dropped = tracker.update_with_dropped(detections)
                 else:
                     tracked = tracker.update(detections)
-            if diagnostic_overlay:
-                overlay = frame.copy()
-                for det in detections:
-                    x1, y1, x2, y2 = _expand_box(det, 10, width, height)
-                    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), 4)
-                for det in dropped:
-                    cv2.rectangle(overlay, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 255), 20)
-                cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-                for det in dropped:
-                    text = f"{det.score:.2f}"
-                    tw, _, _ = _label_metrics(text)
-                    right_x = det.x2 - tw - 6
-                    _draw_label(
-                        frame,
-                        text,
-                        right_x,
-                        det.y1 + 10,
-                        (0, 0, 0),
-                        (0, 255, 255),
-                    )
-                for det in detections:
-                    _draw_label(
-                        frame,
-                        f"{det.class_name} {det.score:.2f}",
-                        det.x1 + 6,
-                        det.y1,
-                        (255, 255, 255),
-                        (0, 0, 255),
-                    )
+            last_raw = list(detections)
+            last_dropped = list(dropped)
+            last_render = []
             for det in detections:
                 crop = frame[det.y1 : det.y2, det.x1 : det.x2]
                 track_id = None
@@ -377,20 +356,52 @@ def run_pipeline(
                             label = last_label[track_id]
                 if track_id is not None:
                     label = f"{label} #{track_id} ({det.score:.2f})"
-                cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
+                last_render.append((det, label))
+            processed_count += 1
+        if diagnostic_overlay and last_raw:
+            overlay = frame.copy()
+            for det in last_raw:
+                x1, y1, x2, y2 = _expand_box(det, 10, width, height)
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), 4)
+            for det in last_dropped:
+                cv2.rectangle(overlay, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 255), 20)
+            cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
+            for det in last_dropped:
+                text = f"{det.score:.2f}"
+                tw, _, _ = _label_metrics(text)
+                right_x = det.x2 - tw - 6
                 _draw_label(
                     frame,
-                    label,
-                    det.x1,
-                    det.y2 + 12,
-                    (255, 255, 255),
-                    (0, 128, 0),
+                    text,
+                    right_x,
+                    det.y1 + 10,
+                    (0, 0, 0),
+                    (0, 255, 255),
                 )
+            for det in last_raw:
+                _draw_label(
+                    frame,
+                    f"{det.class_name} {det.score:.2f}",
+                    det.x1 + 6,
+                    det.y1,
+                    (255, 255, 255),
+                    (0, 0, 255),
+                )
+        for det, label in last_render:
+            cv2.rectangle(frame, (det.x1, det.y1), (det.x2, det.y2), (0, 255, 0), 2)
+            _draw_label(
+                frame,
+                label,
+                det.x1,
+                det.y2 + 12,
+                (255, 255, 255),
+                (0, 128, 0),
+            )
         writer.write(frame)
         count += 1
         frame_idx += 1
-        if count % 5 == 0:
-            logger.info("Processed %d frames", count)
+        if processed_count > 0 and processed_count % 5 == 0 and process_this:
+            logger.info("Processed %d frames", processed_count)
 
     cap.release()
     writer.release()
@@ -401,7 +412,7 @@ def run_pipeline(
     metadata = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": _git_sha(),
-        "input": str(input),
+        "input": str(source_input or input),
         "output": str(out),
         "config": str(config),
         "detector": detector_choice,
@@ -422,7 +433,9 @@ def run_pipeline(
         "diagnostic_overlay": diagnostic_overlay,
         "diagnostic_all_classes": diagnostic_all_classes,
         "frame_count": count,
+        "processed_frame_count": processed_count,
         "output_fps": out_fps,
+        "source_fps": fps,
         "output_codec": chosen_codec,
     }
     _write_sidecar(out, metadata)
@@ -432,6 +445,11 @@ def run_pipeline(
 def run(
     input: Path = typer.Option(..., "--input", exists=True, readable=True, help="Input video path"),
     out: Path = typer.Option(..., "--out", help="Output video path"),
+    normalize_av: bool = typer.Option(
+        True,
+        "--normalize-av/--no-normalize-av",
+        help="Normalize audio/video duration before processing",
+    ),
     config: Path | None = typer.Option(
         None, "--config", exists=True, readable=True, help="Config path"
     ),
@@ -443,7 +461,9 @@ def run(
     ),
     device: str | None = typer.Option(None, "--device", help="Device for YOLO (cpu or cuda)"),
     process_fps: float = typer.Option(
-        15.0, "--process-fps", help="Target processing FPS (drops frames)"
+        15.0,
+        "--process-fps",
+        help="Target processing FPS (drops frames). Use 0 to process every frame.",
     ),
     imgsz: int = typer.Option(640, "--imgsz", help="YOLO inference image size"),
     yolo_conf: float = typer.Option(
@@ -487,30 +507,61 @@ def run(
     iou_thresh: float = typer.Option(0.3, "--iou-thresh", help="IOU threshold for tracking"),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logging"),
 ) -> None:
-    run_pipeline(
-        input=input,
-        out=out,
-        config=config,
-        detector=detector,
-        yolo_weights=yolo_weights,
-        device=device,
-        imgsz=imgsz,
-        yolo_conf=yolo_conf,
-        yolo_classes=yolo_classes,
-        diagnostic_all_classes=diagnostic_all_classes,
-        auto_tag_out=auto_tag_out,
-        classifier=classifier,
-        classifier_model=classifier_model,
-        classifier_device=classifier_device,
-        tracking=tracking,
-        max_age=max_age,
-        iou_thresh=iou_thresh,
-        process_fps=process_fps,
-        classify_every_seconds=classify_every_seconds,
-        max_frames=max_frames,
-        diagnostic_overlay=diagnostic_overlay,
-        verbose=verbose,
-    )
+    if normalize_av:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            normalized = Path(tmpdir) / f"{input.stem}_normalized{input.suffix}"
+            normalize_av(input, normalized)
+            run_pipeline(
+                input=normalized,
+                source_input=input,
+                out=out,
+                config=config,
+                detector=detector,
+                yolo_weights=yolo_weights,
+                device=device,
+                imgsz=imgsz,
+                yolo_conf=yolo_conf,
+                yolo_classes=yolo_classes,
+                diagnostic_all_classes=diagnostic_all_classes,
+                auto_tag_out=auto_tag_out,
+                classifier=classifier,
+                classifier_model=classifier_model,
+                classifier_device=classifier_device,
+                tracking=tracking,
+                max_age=max_age,
+                iou_thresh=iou_thresh,
+                process_fps=process_fps,
+                classify_every_seconds=classify_every_seconds,
+                max_frames=max_frames,
+                diagnostic_overlay=diagnostic_overlay,
+                verbose=verbose,
+            )
+    else:
+        run_pipeline(
+            input=input,
+            source_input=input,
+            out=out,
+            config=config,
+            detector=detector,
+            yolo_weights=yolo_weights,
+            device=device,
+            imgsz=imgsz,
+            yolo_conf=yolo_conf,
+            yolo_classes=yolo_classes,
+            diagnostic_all_classes=diagnostic_all_classes,
+            auto_tag_out=auto_tag_out,
+            classifier=classifier,
+            classifier_model=classifier_model,
+            classifier_device=classifier_device,
+            tracking=tracking,
+            max_age=max_age,
+            iou_thresh=iou_thresh,
+            process_fps=process_fps,
+            classify_every_seconds=classify_every_seconds,
+            max_frames=max_frames,
+            diagnostic_overlay=diagnostic_overlay,
+            verbose=verbose,
+        )
 
 
 if __name__ == "__main__":

@@ -42,6 +42,11 @@ bird-labeler --help
 bird-labeler run --input path\to\input.mp4 --out path\to\output.mp4 --config configs\default.yaml
 ```
 
+AV normalization:
+
+- YouTube clips often have audio streams longer than the video stream.
+- The pipeline normalizes audio/video length at ingest (video duration is authoritative).
+
 Recommended near real-time settings (RTX 3080 Ti):
 
 - `--detector yolo --device cuda --imgsz 640 --process-fps 15 --tracking iou --max-age 15 --iou-thresh 0.3 --classify-every-seconds 1.0`
