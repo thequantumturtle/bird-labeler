@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from bird_labeler.pipeline.ingest import normalize_av
 
@@ -50,7 +49,7 @@ def test_run_calls_normalize_av(monkeypatch, tmp_path: Path) -> None:
         assert kwargs["input"] != input_path
         assert kwargs["source_input"] == input_path
 
-    monkeypatch.setattr(cli, "normalize_av", fake_normalize)
+    monkeypatch.setattr(cli, "normalize_av_file", fake_normalize)
     monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
 
     cli.run(input=input_path, out=output_path, normalize_av=True)

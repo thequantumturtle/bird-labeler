@@ -14,7 +14,7 @@ import typer
 
 from bird_labeler.pipeline.classify import FakeClassifier, HfBirdClassifier
 from bird_labeler.pipeline.detect import FakeDetector, YoloBirdDetector
-from bird_labeler.pipeline.ingest import normalize_av
+from bird_labeler.pipeline.ingest import normalize_av as normalize_av_file
 from bird_labeler.pipeline.track import IouTracker
 
 app = typer.Typer(help="Bird labeling pipeline CLI.")
@@ -510,7 +510,7 @@ def run(
     if normalize_av:
         with tempfile.TemporaryDirectory() as tmpdir:
             normalized = Path(tmpdir) / f"{input.stem}_normalized{input.suffix}"
-            normalize_av(input, normalized)
+            normalize_av_file(input, normalized)
             run_pipeline(
                 input=normalized,
                 source_input=input,
